@@ -1,0 +1,1013 @@
+# SESSION & TOKEN - COMPLETE DOCUMENTATION
+
+## TABLE OF CONTENTS
+1. [Introduction](#introduction)
+2. [Session Management](#session-management)
+3. [Token-Based Authentication](#token-based-authentication)
+4. [Security Comparison](#security-comparison)
+5. [Implementation Guide](#implementation-guide)
+6. [Best Practices](#best-practices)
+7. [Troubleshooting](#troubleshooting)
+
+---
+
+## INTRODUCTION
+
+### What is Authentication?
+Authentication is the process of verifying user identity. After login, the system needs to remember who the user is for subsequent requests.
+
+There are two main approaches:
+1. **Session-Based** - Server remembers the user
+2. **Token-Based** - Client carries proof of identity
+
+---
+
+## SESSION MANAGEMENT
+
+### 1. What is a Session?
+
+A session is a temporary interaction period between a user and a server. Once a user logs in, the server creates a session and stores user information.
+
+```
+User Login → Server Creates Session → Session ID Created
+                                    ↓
+                            Sent to Browser as Cookie
+                                    ↓
+                        Browser Stores & Auto-sends
+                                    ↓
+                        Server Verifies on Every Request
+```
+
+### 2. How Session Works (Step by Step)
+
+#### Step 1: Login
+```
+Browser sends: POST /login
+  username=john
+  password=secret123
+
+Server:
+  1. Verify credentials in database
+  2. Create session object
+  3. Generate random session ID
+  4. Store in database/memory
+  5. Send back to browser
+```
+
+#### Step 2: Session Storage (Server-Side)
+
+```
+Database/Memory:
+{
+  sessionId: "abc123xyz789",
+  userId: 5,
+  username: "john",
+  email: "john@example.com",
+  role: "USER",
+  createdAt: 2025-12-04 10:00:00,
+  expiresAt: 2025-12-05 10:00:00,
+  isActive: true,
+  ipAddress: "192.168.1.100"
+}
+```
+
+#### Step 3: Cookie Storage (Client-Side)
+
+```
+Browser Cookie:
+name: JSESSIONID
+value: abc123xyz789
+path: /
+domain: example.com
+secure: true (HTTPS only)
+httpOnly: true (JS cannot access)
+sameSite: strict (CSRF protection)
+```
+
+#### Step 4: Subsequent Requests
+
+```
+Browser automatically sends:
+GET /dashboard HTTP/1.1
+Host: example.com
+Cookie: JSESSIONID=abc123xyz789
+
+Server:
+  1. Extract session ID from cookie
+  2. Look up in database
+  3. Verify not expired
+  4. Verify user still active
+  5. Grant access
+```
+
+#### Step 5: Logout
+
+```
+Browser sends: POST /logout
+Server:
+  1. Find session by ID
+  2. Mark as inactive/delete
+  3. Send clear-cookie header
+  4. Redirect to login page
+  
+Browser:
+  1. Receives clear-cookie
+  2. Deletes JSESSIONID cookie
+  3. Redirects to login
+```
+
+### 3. Session Data Storage Options
+
+#### In-Memory (Development)
+```
+Storage: Server RAM
+Pros:
+  - Very fast
+  - Easy to implement
+Cons:
+  - Lost on server restart
+  - Cannot scale to multiple servers
+  - High memory usage with many users
+
+Best for: Development, testing, small apps
+```
+
+#### File-Based (Single Server)
+```
+Storage: Server hard drive
+Pros:
+  - Persistent (survives restart)
+  - Simple implementation
+Cons:
+  - Slower than memory
+  - Not suitable for multiple servers
+  - Disk I/O overhead
+
+Best for: Small production apps with single server
+```
+
+#### Database (Traditional)
+```
+Storage: MySQL, PostgreSQL, etc.
+Pros:
+  - Persistent
+  - Can scale to multiple servers
+  - Easy to query
+Cons:
+  - Slower than memory/Redis
+  - Database load increases
+
+Best for: Traditional web apps, moderate scale
+```
+
+#### Redis (Production Standard)
+```
+Storage: In-memory cache with persistence
+Pros:
+  - Very fast (in-memory)
+  - Supports multiple servers
+  - Can be persisted to disk
+  - Built for session storage
+Cons:
+  - Requires Redis infrastructure
+  - Additional system to maintain
+
+Best for: Production apps, high-scale systems
+```
+
+### 4. Session Verification Process
+
+```
+Request arrives with JSESSIONID=xyz
+
+STEP 1: Extract Session ID
+  sessionId = getFromCookie("JSESSIONID")
+  if (sessionId == null) → Return 401 Unauthorized
+
+STEP 2: Look up in Storage
+  session = database.findById(sessionId)
+  if (session == null) → Return 401 Invalid Session
+
+STEP 3: Check Expiration
+  if (session.expiresAt < now) → 
+    delete session
+    return 401 Session Expired
+
+STEP 4: Verify User Active
+  user = database.findById(session.userId)
+  if (!user.isActive) → Return 401 User Inactive
+
+STEP 5: Check Security Attributes
+  if (session.ipAddress != request.ipAddress) →
+    return 401 IP Mismatch (optional)
+
+STEP 6: Verify Permissions
+  if (!hasPermission(user.role, resource)) →
+    return 403 Forbidden
+
+STEP 7: Update Activity
+  session.lastActivityAt = now
+  save to storage
+
+STEP 8: Allow Request
+  ✓ Grant access to resource
+  ✓ Attach user info to request
+  ✓ Continue to controller
+```
+
+### 5. Session Configuration (Spring Boot)
+
+```properties
+# Session timeout (30 minutes)
+server.servlet.session.timeout=30m
+
+# Cookie security
+server.servlet.session.cookie.secure=true
+server.servlet.session.cookie.http-only=true
+server.servlet.session.cookie.same-site=strict
+server.servlet.session.cookie.domain=example.com
+server.servlet.session.cookie.path=/
+
+# Session storage
+spring.session.store-type=redis
+spring.redis.host=localhost
+spring.redis.port=6379
+
+# Enable Spring Session
+spring.session.redis.namespace=spring:session
+```
+
+---
+
+## TOKEN-BASED AUTHENTICATION
+
+### 1. What is a Token?
+
+A token is a piece of data that proves the user's identity. The user carries this token and sends it with every request. The server verifies the token without storing anything.
+
+```
+User Login → Server Generates Token → Token Sent to User
+                                           ↓
+                                  User Stores in Memory
+                                           ↓
+                            User Sends with Every Request
+                                           ↓
+                        Server Verifies Signature (No DB)
+```
+
+### 2. Token Structure (JWT - JSON Web Token)
+
+A JWT has three parts separated by dots:
+
+```
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.
+eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.
+SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c
+```
+
+#### Header
+```json
+{
+  "alg": "HS256",
+  "typ": "JWT"
+}
+```
+
+#### Payload (Claims)
+```json
+{
+  "sub": "1234567890",
+  "name": "John Doe",
+  "iat": 1516239022,
+  "exp": 1516242622,
+  "role": "USER"
+}
+```
+
+#### Signature
+```
+HMACSHA256(
+  base64UrlEncode(header) + "." +
+  base64UrlEncode(payload),
+  secret
+)
+```
+
+### 3. How Token Works (Step by Step)
+
+#### Step 1: Login
+```
+Browser sends: POST /login
+  username=john
+  password=secret123
+
+Server:
+  1. Verify credentials
+  2. Create token payload:
+     {
+       "userId": 5,
+       "username": "john",
+       "role": "USER",
+       "iat": 1702700400,
+       "exp": 1702786800
+     }
+  3. Sign with secret key (HMACSHA256)
+  4. Return base64 encoded token
+```
+
+#### Step 2: Client Storage
+
+```
+Browser receives:
+{
+  "accessToken": "eyJhbGciOiJIUzI1NiIs...",
+  "tokenType": "Bearer",
+  "expiresIn": 3600
+}
+
+Client options:
+1. localStorage (XSS vulnerable)
+   localStorage.setItem('token', response.accessToken)
+
+2. sessionStorage (volatile)
+   sessionStorage.setItem('token', response.accessToken)
+
+3. Memory variable (safest, lost on refresh)
+   let token = response.accessToken
+
+4. httpOnly Cookie (safe from XSS)
+   Set-Cookie: accessToken=...; HttpOnly; Secure
+```
+
+#### Step 3: Sending Token
+
+```
+Browser sends with every request:
+
+Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
+
+Or in custom header:
+
+X-Access-Token: eyJhbGciOiJIUzI1NiIs...
+```
+
+#### Step 4: Token Verification
+
+```
+Server receives: Authorization: Bearer xyz123
+
+STEP 1: Extract token
+  token = header.substring("Bearer ".length())
+
+STEP 2: Split into parts
+  [header, payload, signature] = token.split(".")
+
+STEP 3: Verify signature
+  computedSignature = HMACSHA256(header + payload, secret)
+  if (signature != computedSignature) →
+    return 401 Invalid Token
+
+STEP 4: Decode payload
+  claims = base64_decode(payload)
+
+STEP 5: Check expiration
+  if (claims.exp < now) →
+    return 401 Token Expired
+
+STEP 6: Verify claims
+  userId = claims.userId
+  role = claims.role
+  
+STEP 7: Grant access
+  ✓ Attach claims to request
+  ✓ Continue to controller
+```
+
+### 4. Token Types
+
+#### Access Token
+```
+Purpose: Short-lived authentication token
+Duration: 5 minutes to 1 hour
+Usage: Every API request
+Stored: Memory or sessionStorage
+If stolen: Limited damage (short lived)
+
+JWT Payload:
+{
+  "userId": 5,
+  "role": "USER",
+  "iat": 1702700400,
+  "exp": 1702704000  // 1 hour later
+}
+```
+
+#### Refresh Token
+```
+Purpose: Long-lived token to get new access token
+Duration: 7 days to 30 days
+Usage: When access token expires
+Stored: httpOnly Cookie or secure storage
+If stolen: Can be revoked on server
+
+JWT Payload:
+{
+  "userId": 5,
+  "type": "REFRESH",
+  "iat": 1702700400,
+  "exp": 1710086400  // 7 days later
+}
+```
+
+#### ID Token
+```
+Purpose: User identity information (OAuth2)
+Contains: User claims, profile info
+Usage: Social login, SSO
+Verified: By relying party
+
+JWT Payload:
+{
+  "sub": "1234567890",
+  "name": "John Doe",
+  "email": "john@example.com",
+  "email_verified": true,
+  "iat": 1702700400,
+  "exp": 1702704000
+}
+```
+
+### 5. Token Refresh Flow
+
+```
+1. User logs in
+   POST /login → accessToken (1 hour), refreshToken (7 days)
+
+2. User makes requests
+   GET /api/data + accessToken ✓ Works
+
+3. After 1 hour, access token expires
+   GET /api/data + accessToken ✗ 401 Token Expired
+
+4. Client uses refresh token
+   POST /token/refresh + refreshToken
+   
+5. Server verifies refresh token
+   - Valid?
+   - Not expired?
+   - User still active?
+
+6. Server returns new access token
+   {
+     "accessToken": "new_jwt_token",
+     "expiresIn": 3600
+   }
+
+7. User can continue with new token
+   GET /api/data + newAccessToken ✓ Works
+```
+
+---
+
+## SECURITY COMPARISON
+
+### Session vs Token
+
+```
+┌─────────────────────────────────┬──────────────────┬────────────────┐
+│           Feature               │     SESSION      │     TOKEN      │
+├─────────────────────────────────┼──────────────────┼────────────────┤
+│ Storage Location                │ Server-side      │ Client-side    │
+│ Stateless                       │ ✗ Stateful       │ ✓ Stateless    │
+│ Server Restart Impact           │ Data lost        │ No impact      │
+│ Load Balancing                  │ Sticky sessions  │ Any server OK  │
+│ Scalability                     │ Limited          │ Excellent      │
+│ Mobile Support                  │ Poor             │ Excellent      │
+│ Multiple Servers                │ Difficult        │ Easy           │
+│ Microservices                   │ Not ideal        │ Ideal          │
+│ API Support                     │ Not ideal        │ Ideal          │
+│ Immediate Logout                │ ✓ Yes            │ ✗ Till expiry  │
+│ CSRF Protection                 │ ✓ Built-in       │ ✗ Need manual  │
+│ XSS Protection                  │ Good (HttpOnly)  │ Need care      │
+│ Memory Usage                    │ High (server)    │ Low            │
+│ Database Queries                │ Every request    │ Only verify    │
+│ Third-party Access             │ Difficult        │ Easy (OAuth2)  │
+│ Single Sign-On (SSO)           │ Difficult        │ Easy           │
+│ Session Fixation Attack        │ Possible         │ Not applicable │
+│ Token Blacklisting             │ N/A              │ Possible       │
+│ Revocation Speed               │ Immediate        │ Delayed        │
+└─────────────────────────────────┴──────────────────┴────────────────┘
+```
+
+### Security Concerns
+
+#### Session Security
+
+**Vulnerabilities:**
+- Session Fixation: Attacker sets session ID before user logs in
+- Session Hijacking: Attacker steals session ID via XSS or MITM
+- CSRF: Attacker tricks user into making unwanted request
+
+**Protections:**
+- Regenerate session ID on login
+- Use HTTPS for transmission
+- Set HttpOnly, Secure, SameSite flags
+- Implement CSRF tokens
+- Verify IP address consistency
+
+#### Token Security
+
+**Vulnerabilities:**
+- XSS: JavaScript accesses token from localStorage
+- Token Theft: Attacker steals token and uses it
+- No Logout: Token valid till expiration
+
+**Protections:**
+- Use httpOnly cookies (not localStorage)
+- Keep tokens short-lived
+- Implement token refresh
+- Use strong signing algorithm (HS256 or RS256)
+- Validate signature on every request
+- Implement token blacklist for logout
+
+---
+
+## IMPLEMENTATION GUIDE
+
+### Session Implementation (Spring Boot)
+
+#### 1. Dependencies
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-security</artifactId>
+</dependency>
+<dependency>
+    <groupId>org.springframework.session</groupId>
+    <artifactId>spring-session-data-redis</artifactId>
+</dependency>
+```
+
+#### 2. Configuration
+```java
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig extends WebSecurityConfigurerAdapter {
+    
+    @Override
+    protected void configure(HttpSecurity http) throws Exception {
+        http
+            .authorizeRequests()
+                .antMatchers("/login", "/register").permitAll()
+                .anyRequest().authenticated()
+            .and()
+            .formLogin()
+                .loginPage("/login")
+                .defaultSuccessUrl("/dashboard")
+            .and()
+            .logout()
+                .logoutUrl("/logout")
+                .invalidateHttpSession(true);
+    }
+}
+```
+
+#### 3. Login Controller
+```java
+@PostMapping("/login")
+public String login(@RequestParam String username,
+                    @RequestParam String password,
+                    HttpSession session) {
+    // Authenticate user
+    User user = userService.authenticate(username, password);
+    
+    // Store in session
+    session.setAttribute("userId", user.getId());
+    session.setAttribute("username", user.getUsername());
+    session.setMaxInactiveInterval(30 * 60);
+    
+    return "redirect:/dashboard";
+}
+```
+
+#### 4. Protected Resource
+```java
+@GetMapping("/dashboard")
+public String dashboard(HttpSession session) {
+    Long userId = (Long) session.getAttribute("userId");
+    if (userId == null) {
+        return "redirect:/login";
+    }
+    // User is authenticated
+    return "dashboard";
+}
+```
+
+### Token Implementation (JWT)
+
+#### 1. Dependencies
+```xml
+<dependency>
+    <groupId>io.jsonwebtoken</groupId>
+    <artifactId>jjwt</artifactId>
+    <version>0.11.5</version>
+</dependency>
+```
+
+#### 2. JWT Provider
+```java
+@Component
+public class JwtTokenProvider {
+    
+    @Value("${jwt.secret}")
+    private String jwtSecret;
+    
+    @Value("${jwt.expiration:3600000}")
+    private long jwtExpiration;
+    
+    public String generateToken(String username) {
+        return Jwts.builder()
+                .setSubject(username)
+                .setIssuedAt(new Date())
+                .setExpiration(new Date(System.currentTimeMillis() + jwtExpiration))
+                .signWith(SignatureAlgorithm.HS512, jwtSecret)
+                .compact();
+    }
+    
+    public String getUsernameFromToken(String token) {
+        return Jwts.parser()
+                .setSigningKey(jwtSecret)
+                .parseClaimsJws(token)
+                .getBody()
+                .getSubject();
+    }
+    
+    public boolean validateToken(String token) {
+        try {
+            Jwts.parser().setSigningKey(jwtSecret).parseClaimsJws(token);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+}
+```
+
+#### 3. Login Controller
+```java
+@PostMapping("/login")
+public ResponseEntity<?> login(@RequestBody LoginRequest request) {
+    User user = userService.authenticate(request.getUsername(), request.getPassword());
+    String token = jwtTokenProvider.generateToken(user.getUsername());
+    
+    return ResponseEntity.ok(new LoginResponse(token, "Bearer", 3600));
+}
+```
+
+#### 4. Token Filter
+```java
+@Component
+public class JwtTokenFilter extends OncePerRequestFilter {
+    
+    @Autowired
+    private JwtTokenProvider tokenProvider;
+    
+    @Override
+    protected void doFilterInternal(HttpServletRequest request,
+                                    HttpServletResponse response,
+                                    FilterChain filterChain) throws ServletException, IOException {
+        try {
+            String jwt = getJwtFromRequest(request);
+            
+            if (jwt != null && tokenProvider.validateToken(jwt)) {
+                String username = tokenProvider.getUsernameFromToken(jwt);
+                // Set authentication
+            }
+        } catch (Exception e) {
+            // Handle error
+        }
+        filterChain.doFilter(request, response);
+    }
+    
+    private String getJwtFromRequest(HttpServletRequest request) {
+        String bearerToken = request.getHeader("Authorization");
+        if (bearerToken != null && bearerToken.startsWith("Bearer ")) {
+            return bearerToken.substring(7);
+        }
+        return null;
+    }
+}
+```
+
+#### 5. Protected Resource
+```java
+@GetMapping("/api/user")
+public ResponseEntity<?> getUser(@RequestHeader("Authorization") String token) {
+    if (!jwtTokenProvider.validateToken(token.substring(7))) {
+        return ResponseEntity.status(401).body("Invalid token");
+    }
+    return ResponseEntity.ok("User data");
+}
+```
+
+---
+
+## BEST PRACTICES
+
+### Session Best Practices
+
+1. **Always Use HTTPS**
+   ```properties
+   server.ssl.enabled=true
+   server.ssl.key-store=classpath:keystore.p12
+   ```
+
+2. **Set Cookie Flags**
+   ```properties
+   server.servlet.session.cookie.secure=true
+   server.servlet.session.cookie.http-only=true
+   server.servlet.session.cookie.same-site=strict
+   ```
+
+3. **Implement Session Timeout**
+   ```properties
+   server.servlet.session.timeout=30m
+   ```
+
+4. **Regenerate Session ID on Login**
+   - Prevent session fixation attacks
+   - Spring Security does this automatically
+
+5. **Use Secure Storage**
+   - Production: Use Redis or database
+   - Development: In-memory is OK
+
+6. **Monitor Session Activity**
+   - Track last activity time
+   - Log suspicious patterns
+   - Implement IP checking (optional)
+
+7. **Encrypt Sensitive Data**
+   ```java
+   String encrypted = encryptionUtil.encrypt(sensitiveData);
+   session.setAttribute("key", encrypted);
+   ```
+
+8. **Implement Proper Logout**
+   ```java
+   session.invalidate();
+   SecurityContextHolder.clearContext();
+   ```
+
+### Token Best Practices
+
+1. **Use Strong Algorithm**
+   ```
+   HS256: HMAC with SHA-256
+   RS256: RSA with SHA-256 (asymmetric, better)
+   ES256: ECDSA with SHA-256
+   ```
+
+2. **Keep Tokens Short-Lived**
+   ```
+   Access Token: 5 minutes to 1 hour
+   Refresh Token: 7 to 30 days
+   ```
+
+3. **Use Refresh Token Rotation**
+   ```java
+   // Old refresh token invalidated
+   // New refresh token issued
+   String newAccessToken = refreshAccessToken(oldRefreshToken);
+   ```
+
+4. **Store Securely**
+   ```
+   ✓ httpOnly Cookie
+   ✓ Memory variable
+   ✗ localStorage (XSS vulnerable)
+   ```
+
+5. **Implement Token Blacklist**
+   ```java
+   // On logout
+   tokenBlacklistService.add(token);
+   
+   // On verification
+   if (tokenBlacklistService.contains(token)) {
+       return 401 Unauthorized;
+   }
+   ```
+
+6. **Validate Every Request**
+   - Check signature
+   - Check expiration
+   - Check claims
+   - Check blacklist
+
+7. **Use HTTPS Always**
+   - Prevent token interception
+   - Protect in transit
+
+8. **Implement CSRF Protection**
+   ```
+   For state-changing requests (POST, PUT, DELETE)
+   Include CSRF token in request body or header
+   ```
+
+9. **Include Necessary Claims**
+   ```json
+   {
+     "sub": "user123",
+     "name": "John Doe",
+     "role": "admin",
+     "aud": "myapp",
+     "iss": "myserver",
+     "iat": 1702700400,
+     "exp": 1702704000
+   }
+   ```
+
+10. **Handle Token Refresh Gracefully**
+    ```
+    Client detects token expired
+    Uses refresh token to get new access token
+    Retries original request
+    ```
+
+---
+
+## TROUBLESHOOTING
+
+### Common Session Issues
+
+#### Issue: Session Lost After Server Restart
+**Problem:** In-memory sessions are lost
+**Solution:** Use Redis or database
+```properties
+spring.session.store-type=redis
+```
+
+#### Issue: Session Works on One Server But Not Another
+**Problem:** Sticky sessions not configured
+**Solution:** Use Redis for session storage
+```
+Load Balancer Configuration:
+Enable session affinity / sticky sessions
+OR
+Use centralized session storage (Redis)
+```
+
+#### Issue: Session Timeout Too Aggressive
+**Problem:** Users logged out unexpectedly
+**Solution:** Increase timeout or update on activity
+```properties
+server.servlet.session.timeout=60m
+```
+
+#### Issue: CSRF Errors on Form Submission
+**Problem:** CSRF token missing
+**Solution:** Add CSRF token to forms
+```html
+<form method="post" action="/login">
+    <input type="hidden" name="${_csrf.parameterName}" 
+           value="${_csrf.token}"/>
+    <input type="text" name="username"/>
+    <input type="submit"/>
+</form>
+```
+
+### Common Token Issues
+
+#### Issue: Token Expired But Still Accepted
+**Problem:** Expiration not validated
+**Solution:** Check expiration on every request
+```java
+if (claims.getExpiration().before(new Date())) {
+    throw new TokenExpiredException();
+}
+```
+
+#### Issue: Token Stolen and Misused
+**Problem:** No token revocation
+**Solution:** Implement token blacklist
+```java
+tokenBlacklist.add(token);
+```
+
+#### Issue: CORS Errors with Token Authentication
+**Problem:** Authorization header blocked
+**Solution:** Configure CORS
+```java
+@Configuration
+public class CorsConfig implements WebMvcConfigurer {
+    @Override
+    public void addCorsMappings(CorsRegistry registry) {
+        registry.addMapping("/api/**")
+                .allowedHeaders("Authorization")
+                .allowedMethods("GET", "POST", "PUT", "DELETE");
+    }
+}
+```
+
+#### Issue: Token Payload Too Large
+**Problem:** Including too much data
+**Solution:** Keep payload minimal
+```
+✓ Small: userId, role, iat, exp
+✗ Large: Full user object, permissions array
+```
+
+#### Issue: Token Always Invalid
+**Problem:** Wrong secret key
+**Solution:** Verify secret key matches
+```java
+// Generation
+String token = Jwts.builder()
+    .signWith(SignatureAlgorithm.HS256, SECRET)
+    .compact();
+
+// Verification - must use same SECRET
+String username = Jwts.parser()
+    .setSigningKey(SECRET)  // MUST be same
+    .parseClaimsJws(token)
+    .getBody()
+    .getSubject();
+```
+
+---
+
+## CHOOSING BETWEEN SESSION AND TOKEN
+
+### Use Session When:
+- Building traditional web application
+- Using server-rendered pages (JSP, Thymeleaf)
+- Same domain access
+- Immediate logout required (banking)
+- CSRF protection important
+- Single server or sticky sessions available
+
+### Use Token When:
+- Building mobile app
+- Building REST API
+- Building SPA (React, Vue, Angular)
+- Multiple servers without sticky sessions
+- Microservices architecture
+- Third-party integrations needed
+- Stateless architecture required
+
+### Use Hybrid When:
+- Web + Mobile app
+- Need both immediate logout and stateless API
+- Access token (JWT) + Refresh token (Session)
+- Want benefits of both approaches
+
+---
+
+## SUMMARY TABLE
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                    SESSION vs TOKEN SUMMARY                      │
+├──────────────────────┬──────────────────┬────────────────────────┤
+│ Aspect               │ Session          │ Token (JWT)            │
+├──────────────────────┼──────────────────┼────────────────────────┤
+│ Best For             │ Web apps         │ APIs, Mobile apps      │
+│ Server Load          │ Higher           │ Lower                  │
+│ Scalability          │ Limited          │ Excellent              │
+│ Logout              │ Instant          │ Delayed (till expiry)  │
+│ Statefulness        │ Stateful         │ Stateless              │
+│ CORS                │ Limited          │ Good                   │
+│ Mobile              │ Poor             │ Excellent              │
+│ Implementation      │ Simple           │ Moderate               │
+│ Security            │ Good             │ Good (if HTTPS)        │
+│ Learning Curve      │ Easy             │ Medium                 │
+└──────────────────────┴──────────────────┴────────────────────────┘
+```
+
+---
+
+## ADDITIONAL RESOURCES
+
+### Key Terms
+- **JWT (JSON Web Token)**: Encoded token with claims
+- **CSRF (Cross-Site Request Forgery)**: Attack forcing unwanted actions
+- **XSS (Cross-Site Scripting)**: Attack stealing client data
+- **HTTPS**: Encrypted communication
+- **Redis**: In-memory data store for sessions
+- **Stateless**: Server doesn't store client state
+- **Stateful**: Server stores client state
+- **Token Refresh**: Getting new token using refresh token
+- **Token Blacklist**: List of revoked tokens
+
+### Configuration Checklist
+- [ ] Enable HTTPS
+- [ ] Set secure cookies (if session)
+- [ ] Implement timeout
+- [ ] Use strong encryption keys
+- [ ] Validate all inputs
+- [ ] Implement proper logging
+- [ ] Monitor suspicious activity
+- [ ] Document your implementation
+- [ ] Test security thoroughly
+- [ ] Keep dependencies updated
