@@ -4,16 +4,17 @@ swosti interview:
   1) tell me about yourself in bangla
   2) deser bari koi
   3) apner team e sodosso koijon, mot teammeat koyjon, basay koy jon thaken
-  4) apni ager company charben kno
-  5) ICSQUIZ er down bolte
-  6) DeviceManagement ki doroner project, inhouse or bahir,er kaj ki, ei software er upokar ki.
+  4) team e apner role ki, bakider role ki ?
+  5) apni ager company charben kno
+  6) ICSQUIZ er down bolte
+  7) DeviceManagement ki doroner project, inhouse or bahir,er kaj ki, ei software er upokar ki.
   
   CTO:
-  7) Devicemanagement er kaj ki bises kore inventory kmne manage hoy , kon stack maintain kore. FIFO er example.
-  8) 2 ti value swap without third varible.
-  9) prime number ber check kora
-  10) expectation salary
-  11) apner konokichu janar ache
+  1) Devicemanagement er kaj ki bises kore inventory kmne manage hoy , kon stack maintain kore. FIFO er example.
+  2) 2 ti value swap without third varible.
+  3) prime number ber check kora
+  4) expectation salary
+  5) apner konokichu janar ache
 ```
 
 চমৎকার 👍
